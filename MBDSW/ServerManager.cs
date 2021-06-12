@@ -182,6 +182,7 @@ namespace MBDSW
             Directory.CreateDirectory(backupFolder);
             foreach (var file in backupFiles)
             {
+                bool success = false;
                 for (int i = 0; i < 5; i++)
                 {
                     try
@@ -195,11 +196,19 @@ namespace MBDSW
                         var newPath = Path.Combine(backupFolder, file.Key);
                         (new FileInfo(newPath)).Directory.Create();
                         File.WriteAllBytes(newPath, content);
+                        success = true;
                     } catch (Exception)
                     {
                         Write("Wasn't able to back up '" + file.Key + "'... Retrying...", true);
                     }
                 }
+                if (!success)
+                {
+                    Write("Failed to write all files", true);
+                    Directory.Delete(backupFolder, true);
+                    return;
+                }
+                
             }
         }
 
