@@ -3,9 +3,11 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 16
 VisualStudioVersion = 16.0.31321.278
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MBDSW", "MBDSW\MBDSW.csproj", "{B1701822-EE09-4189-921D-F418CD10A053}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MBDSW", "MBDSW\MBDSW.csproj", "{B1701822-EE09-4189-921D-F418CD10A053}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MBSDW.Tests", "MBSDW.Tests\MBSDW.Tests.csproj", "{58331E99-20C3-4575-8FAB-F793EF388D9E}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MBSDW.Tests", "MBSDW.Tests\MBSDW.Tests.csproj", "{58331E99-20C3-4575-8FAB-F793EF388D9E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MBDSWCLI", "MBDSWCLI\MBDSWCLI.csproj", "{F4B78FC9-7F52-422C-A9AD-7FF9E1E22F1B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -21,6 +23,10 @@ Global
 		{58331E99-20C3-4575-8FAB-F793EF388D9E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{58331E99-20C3-4575-8FAB-F793EF388D9E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{58331E99-20C3-4575-8FAB-F793EF388D9E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F4B78FC9-7F52-422C-A9AD-7FF9E1E22F1B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F4B78FC9-7F52-422C-A9AD-7FF9E1E22F1B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F4B78FC9-7F52-422C-A9AD-7FF9E1E22F1B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F4B78FC9-7F52-422C-A9AD-7FF9E1E22F1B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

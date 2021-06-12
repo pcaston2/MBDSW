@@ -17,7 +17,18 @@ namespace MBDSW
         private ServerState _state = ServerState.NeverStarted;
         private BackupState _backupState = BackupState.Ready;
         public const string BackupFolder = "backups";
+        private ILog _logger;
 
+        public ServerManager(ILog logger = null)
+        {
+            if (logger == null)
+            {
+                _logger = new DebugLogger();
+            } else
+            {
+                _logger = logger;
+            }
+        }
         public enum ServerState
         {
             NeverStarted,
@@ -120,11 +131,11 @@ namespace MBDSW
                 };
                 _server.OutputDataReceived += new DataReceivedEventHandler((sender, e) =>
                     {
-                        Write(e.Data);
+                        Write("(SERVER) " + e.Data);
                     });
                 _server.ErrorDataReceived += new DataReceivedEventHandler((sender, e) =>
                     {
-                        Write(e.Data, true);
+                        Write("(SERVER) " + e.Data, true);
                     });
                 _server.Start();
                 _writer = _server.StandardInput;
@@ -134,7 +145,30 @@ namespace MBDSW
                 _server.BeginErrorReadLine();
             } else
             {
-                Write("No installation could be found, consider running an update");
+                throw new Exception("No installation could be found, consider running an update");
+            }
+        }
+
+        public void Update()
+        {
+            if (isRunning)
+            {
+                Write("The server is running, stop it before updating");
+            } else
+            {
+                if (Updater.NeedsUpdate())
+                {
+                    var urlToDownload = Updater.GetNewFilename();
+                    Write("Found new version: " + urlToDownload);
+                    var download = Updater.GetUpdate(urlToDownload);
+                    Write("Update downloaded " + download.Length + " bytes");
+                    Updater.Extract(download);
+                    Updater.SetCurrentFilename(urlToDownload);
+                    Write("Update complete");
+                } else
+                {
+                    Write("No updates required");
+                }
             }
         }
 
@@ -172,7 +206,10 @@ namespace MBDSW
                     BackupFiles(backupFiles);
                     Send("save resume");
                 }
-                Debug.WriteLine((error ? "[ERROR] " : "") + message);
+                if (_logger != null)
+                {
+                    _logger.Log((error ? "[ERROR] " : "") + message);
+                }
             }
         }
 

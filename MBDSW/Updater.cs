@@ -61,12 +61,12 @@ namespace MBDSW
             return RegexUtil.FindInString(pageContent, FILENAME_REGEX_PATTERN, "filename");
         }
 
-        private static byte[] GetUpdate(string urlToDownload)
+        public static byte[] GetUpdate(string urlToDownload)
         {
             return WebGetUtil.GetByteContentFromUrl(urlToDownload);
         }
 
-        private static void Extract(byte[] zip)
+        public static void Extract(byte[] zip)
         {
             var listToNotOverwrite = new List<String>
             {
