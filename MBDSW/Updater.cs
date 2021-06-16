@@ -66,6 +66,18 @@ namespace MBDSW
             return WebGetUtil.GetByteContentFromUrl(urlToDownload);
         }
 
+        public static List<Process> GetRunningServers()
+        {
+            return Process.GetProcessesByName("bedrock_server.exe").ToList();
+        }
+
+        public static int KillAllServers()
+        {
+            var servers = GetRunningServers();
+            servers.ForEach(s => s.Kill());
+            return servers.Count;
+        }
+
         public static void Extract(byte[] zip)
         {
             var listToNotOverwrite = new List<String>

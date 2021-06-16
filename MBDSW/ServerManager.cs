@@ -57,23 +57,89 @@ namespace MBDSW
 
         public void Backup()
         {
-            Send("save hold");
-            if (WaitForBackup(BackupState.Saving, 5000))
+            if (_state == ServerState.Running)
             {
-                for (int i = 0; i < 10; i++)
+                if (_backupState == BackupState.Ready)
                 {
-                    Send("save query");
-                    var result = WaitForBackup(BackupState.Hold, 1000);
-                    if (result == true)
+                    _backupState = BackupState.BackupRequested;
+                    Send("save hold");
+                    if (WaitForBackup(BackupState.Saving, 5000))
                     {
-                        return;
-                    }
+                        for (int i = 0; i < 10; i++)
+                        {
+                            Send("save query");
+                            var result = WaitForBackup(BackupState.Hold, 1000);
+                            if (result == true)
+                            {
+                                return;
+                            }
+                        }
+                    };
+                } else
+                {
+                    Write("Backup status is in the wrong state: " + Enum.GetName(typeof(BackupState), _backupState));
                 }
-            };
-
+            } else
+            {
+                Write("Can't back up when not running. Server is in wrong state: " + Enum.GetName(typeof(ServerState), _state));
+            }
         }
 
-        private void Send(string command)
+        public List<string> ListBackups()
+        {
+            return Directory.EnumerateDirectories("backups")
+                .OrderByDescending(s => s)
+                .ToList();
+        }
+
+        public void Restore()
+        {
+            if (!isRunning)
+            {
+                var restoreName = ListBackups().FirstOrDefault();
+                if (restoreName == null)
+                {
+                    Write("No backups available to restore");
+                } else
+                {
+                    Write("Restoring from backup '" + restoreName + "'");
+                    var files = Directory.GetFiles(restoreName, "*", SearchOption.AllDirectories).ToList();
+                    files = files.Select(s => s.Replace(restoreName, String.Empty)).ToList();
+                    try
+                    {                    
+                        foreach (var file in files)
+                        {
+                            Write("Restoring file '" + file + "'");
+                            var oldPath = Path.Join(restoreName, file);
+                            var newPath = Path.Join("bds", "worlds", file);
+                            (new FileInfo(newPath)).Directory.Create();
+                            File.Copy(oldPath, newPath, true);
+                        }
+                    } catch (Exception ex)
+                    {
+                        Write("Failed to restore from backup: " + ex.Message);
+                    }
+                }
+            } else
+            {
+                Write("Can't restore while running. Server is in wrong state: " + Enum.GetName(typeof(ServerState), _state));
+            }
+        }
+
+        public void KillAll()
+        {
+            var count = Updater.KillAllServers();
+            if (count == 0)
+            {
+                Write("No servers appear to be running.");
+            }
+            else
+            {
+                Write("Killed " + count + " running servers.");
+            }
+        }
+
+        public void Send(string command)
         {
             if (_state == ServerState.Running)
             {
@@ -87,24 +153,32 @@ namespace MBDSW
 
         public void Stop()
         {
-            try
+            if (isRunning)
             {
-                Send("stop");
-                var stopped = WaitUntil(ServerState.Stopped, 5000);
-                if (!stopped)
+                try
                 {
-                    Write("Server couldn't be stopped in time, killing process", true);
-                    if (_state != ServerState.Stopped)
+                    Send("stop");
+                    var stopped = WaitUntil(ServerState.Stopped, 5000);
+                    if (!stopped)
                     {
-                        _server.Kill(true);
-                        _state = ServerState.Killed;
+                        Write("Server couldn't be stopped in time, killing process", true);
+                        if (_state != ServerState.Stopped)
+                        {
+                            _server.Kill(true);
+                            _state = ServerState.Killed;
+                        }
                     }
                 }
-            } finally
+                finally
+                {
+                    _server.Kill(true);
+                }
+            } else
             {
-                _server.Kill(true);
+                Write("Can't stop server, it is not running");
             }
         }
+
 
         public ServerState State => _state;
         public void Dispose()
@@ -116,36 +190,54 @@ namespace MBDSW
         {
             if (Updater.IsInstalled())
             {
-                _server = new Process()
+                if (!isRunning)
                 {
-                    StartInfo = new ProcessStartInfo()
+                    _server = new Process()
                     {
-                        UseShellExecute = false,
-                        FileName = Path.Combine(Updater.serverPath, "bedrock_server.exe"),
-                        CreateNoWindow = true,
-                        WindowStyle = ProcessWindowStyle.Maximized,
-                        RedirectStandardError = true,
-                        RedirectStandardInput = true,
-                        RedirectStandardOutput = true,
-                    }
-                };
-                _server.OutputDataReceived += new DataReceivedEventHandler((sender, e) =>
-                    {
-                        Write("(SERVER) " + e.Data);
-                    });
-                _server.ErrorDataReceived += new DataReceivedEventHandler((sender, e) =>
-                    {
-                        Write("(SERVER) " + e.Data, true);
-                    });
-                _server.Start();
-                _writer = _server.StandardInput;
-                _state = ServerState.Starting;
-                
-                _server.BeginOutputReadLine();
-                _server.BeginErrorReadLine();
+                        StartInfo = new ProcessStartInfo()
+                        {
+                            UseShellExecute = false,
+                            FileName = Path.Combine(Updater.serverPath, "bedrock_server.exe"),
+                            CreateNoWindow = true,
+                            WindowStyle = ProcessWindowStyle.Maximized,
+                            RedirectStandardError = true,
+                            RedirectStandardInput = true,
+                            RedirectStandardOutput = true,
+                        },
+                        EnableRaisingEvents = true,
+                    };
+                    _server.OutputDataReceived += new DataReceivedEventHandler((sender, e) =>
+                        {
+                            if (e.Data != null)
+                            {
+                                Write("(SERVER) " + e.Data);
+                            }
+                        });
+                    _server.ErrorDataReceived += new DataReceivedEventHandler((sender, e) =>
+                        {
+                            if (e.Data != null)
+                            {
+                                Write("(SERVER) " + e.Data, true);
+                            }
+                        });
+                    _server.Exited += new EventHandler((sender, e) =>
+                        {
+                            Write("Server process has exited with code " + _server.ExitCode);
+                            _state = ServerState.Stopped;
+                        });
+                    _server.Start();
+                    _writer = _server.StandardInput;
+                    _state = ServerState.Starting;
+
+                    _server.BeginOutputReadLine();
+                    _server.BeginErrorReadLine();
+                } else
+                {
+                    Write("Server is in wrong state: " + Enum.GetName(typeof(ServerState), _state));
+                }
             } else
             {
-                throw new Exception("No installation could be found, consider running an update");
+                Write("No installation could be found, consider running an update");
             }
         }
 
@@ -162,6 +254,7 @@ namespace MBDSW
                     Write("Found new version: " + urlToDownload);
                     var download = Updater.GetUpdate(urlToDownload);
                     Write("Update downloaded " + download.Length + " bytes");
+                    Write("Extracting files, this make take a while...");
                     Updater.Extract(download);
                     Updater.SetCurrentFilename(urlToDownload);
                     Write("Update complete");
@@ -176,77 +269,108 @@ namespace MBDSW
         {
             if (message != null)
             {
-                switch (message) {
-                    case "[INFO] Server started.":
-                        _state = ServerState.Running;
-                        break;
-                    case "[INFO] Server stop requested.":
-                        _state = ServerState.StopRequested;
-                        break;
-                    case "[INFO] Stopping server...":
-                        _state = ServerState.Stopping;
-                        break;
-                    case "Quit correctly":
-                        _state = ServerState.Stopped;
-                        break;
-                    case "Saving...":
-                        _backupState = BackupState.Saving;
-                        break;
-                    case "Changes to the level are resumed.":
-                        _backupState = BackupState.Ready;
-                        LastBackup = DateTime.Now;
-                        break;
-                }
-                if (message.StartsWith("Data saved."))
-                {
-                    _backupState = BackupState.Hold;
-                } else if (message.Contains("db/CURRENT"))
-                {
-                    var backupFiles = ParseBackupFilePaths(message);
-                    BackupFiles(backupFiles);
-                    Send("save resume");
-                }
+
                 if (_logger != null)
                 {
                     _logger.Log((error ? "[ERROR] " : "") + message);
                 }
+                switch (message) {
+                    case "(SERVER) [INFO] Server started.":
+                        _state = ServerState.Running;
+                        break;
+                    case "(SERVER) [INFO] Server stop requested.":
+                        _state = ServerState.StopRequested;
+                        break;
+                    case "(SERVER) [INFO] Stopping server...":
+                        _state = ServerState.Stopping;
+                        break;
+                    case "(SERVER) Quit correctly":
+                        _state = ServerState.Stopped;
+                        break;
+                    case "(SERVER) Saving...":
+                        if (_backupState == BackupState.BackupRequested)
+                        {
+                            _backupState = BackupState.Saving;
+                        }
+                        break;
+                    case "(SERVER) Changes to the level are resumed.":
+                        _backupState = BackupState.Ready;
+                        break;
+                }
+                if (message.StartsWith("(SERVER) Data saved."))
+                {
+                    if (_backupState == BackupState.Saving)
+                    {
+                        _backupState = BackupState.Hold;
+                    }
+                } else if (message.StartsWith("(SERVER)") && message.Contains("db/CURRENT"))
+                {
+                    if (_backupState == BackupState.Hold)
+                    {
+                        var backupFiles = ParseBackupFilePaths(message.Replace("(SERVER) ", ""));
+                        var backupSuccess = BackupFiles(backupFiles);
+                        Send("save resume");
+                        if (backupSuccess)
+                        {
+                            Write("Backup was successful");
+                            LastBackup = DateTime.Now;
+                        }
+                        else
+                        {
+                            Write("Backup failed", true);
+                        }
+                    }
+                }
             }
         }
 
-        private void BackupFiles(Dictionary<string, int> backupFiles)
+        private bool BackupFiles(Dictionary<string, int> backupFiles)
         {
             var backupFolder = Path.Combine(BackupFolder, DateTime.Now.ToString("yyyy_dd_MM HH_mm_ss"));
             Directory.CreateDirectory(backupFolder);
+            int tries = 3;
             foreach (var file in backupFiles)
             {
-                bool success = false;
-                for (int i = 0; i < 5; i++)
+                Write("Backing up '" + file.Key + "'");
+                bool success = true;
+                for (int i = 0; i < tries; i++)
                 {
                     try
                     {
                         var path = Path.Combine(Updater.serverPath, "worlds", file.Key);
                         var content = new byte[file.Value];
-                        using (var fileStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                        //if (file.Value > 0)
+                        //{
+                        //    using (var fileStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                        //    {
+                        //        fileStream.Read(content, 0, file.Value);
+                        //    }
+                        //}
+                        var newPath = Path.Combine(backupFolder, file.Key);
+                        (new FileInfo(newPath)).Directory.Create();
+                        File.Copy(path, newPath);
+                        using (var fileStream = new FileStream(newPath, FileMode.Open, FileAccess.Read, FileShare.Read))
                         {
                             fileStream.Read(content, 0, file.Value);
                         }
-                        var newPath = Path.Combine(backupFolder, file.Key);
-                        (new FileInfo(newPath)).Directory.Create();
                         File.WriteAllBytes(newPath, content);
-                        success = true;
-                    } catch (Exception)
+                        break;
+                    } catch (Exception ex)
                     {
-                        Write("Wasn't able to back up '" + file.Key + "'... Retrying...", true);
+                        success = false;
+                        Write("Wasn't able to back up '" + file.Key + "': " + ex.Message, true);
+                        Sleep(1000);
+                        Write("Retrying (" + (i + 1) + "/" + tries + ")...");
                     }
                 }
                 if (!success)
                 {
-                    Write("Failed to write all files", true);
+                    Write("Failed to backup '" + file.Key + "'", true);
                     Directory.Delete(backupFolder, true);
-                    return;
+                    return false;
                 }
-                
             }
+            return true;
         }
 
         private Dictionary<string, int> ParseBackupFilePaths(string message)
@@ -265,8 +389,14 @@ namespace MBDSW
 
         public int Wait()
         {
-            _server.WaitForExit();
-            return _server.ExitCode;
+            if (isRunning)
+            {
+                _server.WaitForExit();
+                return _server.ExitCode;
+            } else
+            {
+                return 0;
+            }
         }
 
         public bool WaitWhile(ServerState state, int? timeout)
