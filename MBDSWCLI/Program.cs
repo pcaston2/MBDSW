@@ -30,6 +30,9 @@ namespace MBDSWCLI
                     case "backup":
                         manager.Backup();
                         break;
+                    case "fullbackup":
+                        manager.Backup(true);
+                        break;
                     case "restore":
                         manager.Restore();
                         break;
@@ -40,8 +43,11 @@ namespace MBDSWCLI
                             "stop",
                             "send",
                             "backup",
+                            "fullbackup",
                             "restore",
+                            "cleanup",
                             "listbackups",
+                            "listfullbackups",
                             "kill",
                             "help",
                             "exit",
@@ -56,10 +62,21 @@ namespace MBDSWCLI
                         manager.Stop();
                         manager.Wait();
                         return;
+                    case "cleanup":
+                        manager.CleanBackups();
+                        break;
                     case "listbackups":
                         var backups = manager.ListBackups();
                         logger.Log("Backups:");
                         backups.ForEach(b => logger.Log(b));
+                        break;
+                    case "listfullbackups":
+                        var fullBackups = manager.ListBackups(true);
+                        logger.Log("Full Backups:");
+                        fullBackups.ForEach(b => logger.Log(b));
+                        break;
+                    case "keepalive":
+                        ServerManager.KeepAlive(logger);
                         break;
                     default:
                         if (command.StartsWith("send"))

@@ -16,9 +16,25 @@ namespace MBDSW
         private AutoResetEvent _res = new AutoResetEvent(false);
         private ServerState _state = ServerState.NeverStarted;
         private BackupState _backupState = BackupState.Ready;
+        private BackupMode _backupMode;
         public const string BackupFolder = "backups";
         private ILog _logger;
+        public DateTime? LastIncrementalBackup = null;
+        public DateTime? LastFullBackup = null;
+        public DateTime? LastVersionCheck = null;
+        public enum BackupState 
+        { 
+            Ready,
+            BackupRequested,
+            Saving,
+            Hold,
+        }
 
+        public enum BackupMode
+        {
+            Incremental,
+            Full
+        }
         public ServerManager(ILog logger = null)
         {
             if (logger == null)
@@ -43,20 +59,117 @@ namespace MBDSW
         public bool runningState => !(_state == ServerState.NeverStarted || _state == ServerState.Stopped || _state == ServerState.Killed);
 
         public bool isRunning => _server != null && _server.HasExited == false && runningState;
+        public bool PendingUpdate { get; set; }
 
-        public enum BackupState 
-        { 
-            Ready,
-            BackupRequested,
-            Saving,
-            Hold,
+
+
+        public static void KeepAlive(ILog logger)
+        {
+            while (true)
+            {
+                using (var manager = new ServerManager(logger))
+                {
+                    try
+                    {
+                        try
+                        {
+                            manager.Update();
+                        } catch (Exception ex)
+                        {
+                            logger.Log("Updating wasn't successful: " + ex.ToString());
+                        }
+                        manager.Start();
+                        if (!manager.WaitUntil(ServerState.Running, 30000))
+                        {
+                            throw new Exception("It doesn't look like the server started in time");
+                        } else
+                        {
+                            logger.Log("Server has started, Keep Alive mode now managing backups and updates");
+                        }
+                        bool shouldCleanup = false;
+                        while (true)
+                        {
+                            System.Threading.Thread.Sleep(30000);
+                            if (!manager.LastIncrementalBackup.HasValue || DateTime.Now - manager.LastIncrementalBackup.Value > new TimeSpan(0, 10, 0))
+                            {
+                                manager.Backup();
+                                shouldCleanup = true;
+                            } else if (!manager.PendingUpdate && (!manager.LastVersionCheck.HasValue || DateTime.Now - manager.LastVersionCheck > new TimeSpan(3,0,0)))
+                            {
+                                if (manager.HasUpdate())
+                                {
+                                    logger.Log("Update found. It will be installed overnight");
+                                }
+                            }                            
+                            else if (!manager.LastFullBackup.HasValue || DateTime.Now - manager.LastFullBackup.Value > new TimeSpan(1, 0, 0, 0))
+                            {
+                                manager.Backup(true);
+                                shouldCleanup = true;
+                            }
+                            else if (manager.PendingUpdate && DateTime.Now.TimeOfDay.Hours >= 2 && DateTime.Now.TimeOfDay.Hours <= 3)
+                            {
+                                logger.Log("Stopping server to perform update");
+                                manager.Stop();
+                                if (manager.WaitUntil(ServerState.Stopped, 30000)) {
+                                    manager.Update();
+                                    manager.Start();
+                                    logger.Log("Server is starting after updates");
+                                } else
+                                {
+                                    throw new Exception("Server failed to stop for updates");
+                                }
+                            } else if (shouldCleanup)
+                            {
+                                manager.CleanBackups();
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.Log("An error occurred when running in Keep Alive mode: " + ex.ToString());
+                        System.Threading.Thread.Sleep(5000);
+                        logger.Log("Restarting...");
+                    }
+                }
+            }
         }
 
-        public DateTime? LastBackup = null;
 
-
-        public void Backup()
+        public void CleanBackups()
         {
+            var backups = ListBackups().Skip(10).ToList();
+            foreach (var backup in backups)
+            {
+                Write("Clearing out backup: " + backup);
+                try
+                {
+                    Directory.Delete(backup, true);
+                }
+                catch (Exception ex)
+                {
+                    Write("Failed to remove backup '" + backup + "': " + ex.ToString());
+                }
+            }
+
+            var fullBackups = ListBackups(true).Skip(10).ToList();
+            foreach (var backup in fullBackups)
+            {
+                Write("Clearing out full backup: " + backup);
+                try
+                {
+                    Directory.Delete(backup, true);
+                }
+                catch (Exception ex)
+                {
+                    Write("Failed to remove full backup '" + backup + "': " + ex.ToString());
+                }
+            }
+        }
+
+        public void Backup(bool full = false)
+        {
+            _backupMode = full ? BackupMode.Full : BackupMode.Incremental;
+            Write("Starting backup with mode: " + Enum.GetName(typeof(BackupMode), _backupMode));
             if (_state == ServerState.Running)
             {
                 if (_backupState == BackupState.Ready)
@@ -85,9 +198,9 @@ namespace MBDSW
             }
         }
 
-        public List<string> ListBackups()
+        public List<string> ListBackups(bool full = false)
         {
-            return Directory.EnumerateDirectories("backups")
+            return Directory.EnumerateDirectories("backups").Where(s => s.Contains("FULL") == full)
                 .OrderByDescending(s => s)
                 .ToList();
         }
@@ -248,7 +361,7 @@ namespace MBDSW
                 Write("The server is running, stop it before updating");
             } else
             {
-                if (Updater.NeedsUpdate())
+                if (HasUpdate())
                 {
                     var urlToDownload = Updater.GetNewFilename();
                     Write("Found new version: " + urlToDownload);
@@ -258,11 +371,23 @@ namespace MBDSW
                     Updater.Extract(download);
                     Updater.SetCurrentFilename(urlToDownload);
                     Write("Update complete");
+                    PendingUpdate = false;
                 } else
                 {
                     Write("No updates required");
                 }
             }
+        }
+
+        public bool HasUpdate()
+        {
+            LastVersionCheck = DateTime.Now;
+            var hasUpdate = Updater.NeedsUpdate();
+            if (hasUpdate)
+            {
+                PendingUpdate = true;
+            }
+            return hasUpdate;
         }
 
         public void Write(String message, bool error = false)
@@ -313,7 +438,14 @@ namespace MBDSW
                         if (backupSuccess)
                         {
                             Write("Backup was successful");
-                            LastBackup = DateTime.Now;
+                            if (_backupMode == BackupMode.Full)
+                            {
+                                LastFullBackup = DateTime.Now;
+                            }
+                            else
+                            {
+                                LastIncrementalBackup = DateTime.Now;
+                            }
                         }
                         else
                         {
@@ -326,7 +458,9 @@ namespace MBDSW
 
         private bool BackupFiles(Dictionary<string, int> backupFiles)
         {
-            var backupFolder = Path.Combine(BackupFolder, DateTime.Now.ToString("yyyy_dd_MM HH_mm_ss"));
+            var backupFolderName = (_backupMode == BackupMode.Full ? "FULL_" : String.Empty) + DateTime.Now.ToString("yyyy_dd_MM HH_mm_ss");
+            Write("Backing up to: " + backupFolderName);
+            var backupFolder = Path.Combine(BackupFolder, backupFolderName);
             Directory.CreateDirectory(backupFolder);
             int tries = 3;
             foreach (var file in backupFiles)
@@ -339,13 +473,6 @@ namespace MBDSW
                     {
                         var path = Path.Combine(Updater.serverPath, "worlds", file.Key);
                         var content = new byte[file.Value];
-                        //if (file.Value > 0)
-                        //{
-                        //    using (var fileStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
-                        //    {
-                        //        fileStream.Read(content, 0, file.Value);
-                        //    }
-                        //}
                         var newPath = Path.Combine(backupFolder, file.Key);
                         (new FileInfo(newPath)).Directory.Create();
                         File.Copy(path, newPath);
