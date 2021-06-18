@@ -16,6 +16,6 @@ Features:
 This is a work in progress, use at your own risk.
 
 Future:
--Web UI for managing server from anywhere
--Host multiple servers
--More!
+- Web UI for managing server from anywhere
+- Host multiple servers
+- More!
