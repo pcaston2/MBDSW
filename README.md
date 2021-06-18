@@ -13,7 +13,7 @@ Features:
 - Restore from backups
 - Send commands to server
 
-This is a work in progress, use at your own risk.
+**This is a work in progress, use at your own risk.**
 
 Future:
 - Web UI for managing server from anywhere
